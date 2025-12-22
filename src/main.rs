@@ -20,8 +20,12 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let filter = EnvFilter::new("debug,reqwest=error,hyper=error,hyper_util=error");
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    let filter = EnvFilter::new("info,reqwest=error,hyper=error,hyper_util=error");
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .compact()
+        .init();
 
     let args = Args::parse();
     let config = Config::from(&args.config_path).await?;

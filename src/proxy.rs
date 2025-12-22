@@ -1,5 +1,5 @@
 use axum::{
-    Extension, Router,
+    Router,
     body::Body,
     extract::{Request as ExtractRequest, State},
     http::{HeaderMap, Request, StatusCode, Uri},
@@ -12,6 +12,7 @@ use reqwest::{
     RequestBuilder,
     header::{AUTHORIZATION, HOST},
 };
+use tracing::Instrument;
 use url::Url;
 
 use std::net::SocketAddr;
@@ -76,8 +77,9 @@ impl Proxy {
             .route("/{*wildcard}", any(Self::proxy))
             .route("/health", any(Self::health))
             .fallback(any(Self::fallback))
-            .layer(middleware::from_fn(Self::add_request_id))
-            .with_state(app_state);
+            .with_state(app_state)
+            .layer(middleware::from_fn(Self::logging_middleware))
+            .layer(middleware::from_fn(Self::request_id_middleware));
 
         let addr = self.config.server.address.parse::<SocketAddr>()?;
         tracing::debug!("Server listening on {}", addr);
@@ -86,29 +88,24 @@ impl Proxy {
             .serve(app.into_make_service())
             .await?;
 
-        tracing::debug!("Proxy server done");
         Ok(())
     }
 
-    async fn proxy(
-        State(state): State<AppState>,
-        Extension(request_id): Extension<RequestId>,
-        req: Request<Body>,
-    ) -> Result<Response> {
-        tracing::debug!(request_id = %request_id.as_str(), url = %req.uri(), "Proxy request");
+    async fn proxy(State(state): State<AppState>, req: Request<Body>) -> Result<Response> {
+        tracing::info!("Proxy request");
         let upstream_req = Self::build_upstream_request(&state, req).await?;
         let response = Self::send_upstream_request(upstream_req).await?;
         Self::build_downstream_response(response).await
     }
 
-    async fn fallback(Extension(request_id): Extension<RequestId>) -> impl IntoResponse {
-        tracing::error!(request_id = %request_id.as_str(), "Fallback not expected");
+    async fn fallback() -> impl IntoResponse {
+        tracing::error!("Fallback not expected");
         StatusCode::NOT_FOUND
     }
 
-    async fn health(Extension(request_id): Extension<RequestId>) -> impl IntoResponse {
-        tracing::debug!(request_id = %request_id.as_str(), "Health request");
-        StatusCode::OK
+    async fn health() -> impl IntoResponse {
+        tracing::debug!("Health request");
+        (StatusCode::OK, "ok")
     }
 
     async fn send_upstream_request(upstream_req: RequestBuilder) -> Result<reqwest::Response> {
@@ -192,7 +189,7 @@ impl Proxy {
         url
     }
 
-    async fn add_request_id(mut req: ExtractRequest, next: Next) -> Response {
+    async fn request_id_middleware(mut req: ExtractRequest, next: Next) -> Response {
         let request_id = RequestId::new();
         req.extensions_mut().insert(request_id.clone());
 
@@ -201,6 +198,39 @@ impl Proxy {
         response.headers_mut().insert(
             REQUEST_ID_HEADER.clone(),
             HeaderValue::from_str(request_id.as_str()).unwrap(),
+        );
+
+        response
+    }
+
+    async fn logging_middleware(req: ExtractRequest, next: Next) -> Response {
+        let method = req.method().clone();
+        let uri = req.uri().clone();
+
+        let request_id = req
+            .extensions()
+            .get::<RequestId>()
+            .map(|r| r.as_str())
+            .unwrap_or_else(|| "<missing>")
+            .to_owned();
+
+        let span = tracing::info_span!(
+            "http.request",
+            request_id = %request_id,
+            method = %method,
+            path = %uri.path(),
+        );
+
+        let response = async { next.run(req).await }.instrument(span).await;
+
+        let status = response.status().as_u16();
+
+        tracing::info!(
+            request_id = %request_id,
+            method = %method,
+            path = %uri.path(),
+            status = status,
+            "request"
         );
 
         response
