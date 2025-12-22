@@ -2,12 +2,11 @@ mod app_state;
 mod config;
 mod error;
 mod proxy;
-mod request_id;
 
 use std::path::PathBuf;
 
 use clap::Parser;
-use proxy::Proxy;
+use proxy::ProxyServer;
 use tracing_subscriber::EnvFilter;
 
 use crate::{config::Config, error::Result};
@@ -28,9 +27,14 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    let config = Config::from(&args.config_path).await?;
+    let config = Config::from(&args.config_path)
+        .await
+        .inspect_err(|err| tracing::error!(%err, "Failed to load config"))?;
 
-    let proxy_server = Proxy::new(config);
-    proxy_server.start().await?;
+    let proxy_server = ProxyServer::new(config);
+    proxy_server
+        .start()
+        .await
+        .inspect_err(|err| tracing::error!(%err, "Failed to start proxy server"))?;
     Ok(())
 }

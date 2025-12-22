@@ -1,71 +1,34 @@
 use axum::{
     Router,
     body::Body,
-    extract::{Request as ExtractRequest, State},
+    extract::State,
     http::{HeaderMap, Request, StatusCode, Uri},
-    middleware::{self, Next},
+    middleware::{self},
     response::{IntoResponse, Response},
     routing::any,
 };
-use http::{HeaderName, HeaderValue};
 use reqwest::{
     RequestBuilder,
     header::{AUTHORIZATION, HOST},
 };
-use tracing::Instrument;
 use url::Url;
 
 use std::net::SocketAddr;
-use thiserror::Error;
 
 use crate::{
     app_state::AppState,
-    config::{Config, ConfigError},
-    request_id::RequestId,
+    config::Config,
+    proxy::{
+        error::{ProxyError, Result},
+        middleware::{observability, request_id},
+    },
 };
 
-static REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
-
-#[derive(Debug, Error)]
-pub enum ProxyError {
-    #[error("failed to create service: {0}")]
-    Service(#[from] std::io::Error),
-    #[error("failed to parse address: {0}")]
-    Address(#[from] std::net::AddrParseError),
-    #[error("failed to convert config to app state: {0}")]
-    Config(#[from] ConfigError),
-    #[error("failed to convert body to bytes: {0}")]
-    BodyToBytes(#[from] axum_core::Error),
-    #[error("failed to send upstream request: {0}")]
-    UpstreamRequest(#[from] reqwest::Error),
-    #[error("failed to build response: {0}")]
-    ResponseBuild(#[from] http::Error),
-    #[error("unauthorized")]
-    Unauthorized,
-}
-
-impl IntoResponse for ProxyError {
-    fn into_response(self) -> Response {
-        let status = match &self {
-            ProxyError::Service(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ProxyError::Address(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ProxyError::Config(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ProxyError::BodyToBytes(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ProxyError::UpstreamRequest(_) => StatusCode::BAD_GATEWAY,
-            ProxyError::ResponseBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ProxyError::Unauthorized => StatusCode::UNAUTHORIZED,
-        };
-        (status, self.to_string()).into_response()
-    }
-}
-
-pub type Result<T> = std::result::Result<T, ProxyError>;
-
-pub struct Proxy {
+pub struct ProxyServer {
     config: Config,
 }
 
-impl Proxy {
+impl ProxyServer {
     pub fn new(config: Config) -> Self {
         Self { config }
     }
@@ -78,11 +41,11 @@ impl Proxy {
             .route("/health", any(Self::health))
             .fallback(any(Self::fallback))
             .with_state(app_state)
-            .layer(middleware::from_fn(Self::logging_middleware))
-            .layer(middleware::from_fn(Self::request_id_middleware));
+            .layer(middleware::from_fn(observability))
+            .layer(middleware::from_fn(request_id));
 
         let addr = self.config.server.address.parse::<SocketAddr>()?;
-        tracing::debug!("Server listening on {}", addr);
+        tracing::info!("Server listening on {}", addr);
 
         axum_server::bind(addr)
             .serve(app.into_make_service())
@@ -92,7 +55,7 @@ impl Proxy {
     }
 
     async fn proxy(State(state): State<AppState>, req: Request<Body>) -> Result<Response> {
-        tracing::info!("Proxy request");
+        tracing::debug!("Proxy request");
         let upstream_req = Self::build_upstream_request(&state, req).await?;
         let response = Self::send_upstream_request(upstream_req).await?;
         Self::build_downstream_response(response).await
@@ -188,53 +151,6 @@ impl Proxy {
         }
         url
     }
-
-    async fn request_id_middleware(mut req: ExtractRequest, next: Next) -> Response {
-        let request_id = RequestId::new();
-        req.extensions_mut().insert(request_id.clone());
-
-        let mut response = next.run(req).await;
-
-        response.headers_mut().insert(
-            REQUEST_ID_HEADER.clone(),
-            HeaderValue::from_str(request_id.as_str()).unwrap(),
-        );
-
-        response
-    }
-
-    async fn logging_middleware(req: ExtractRequest, next: Next) -> Response {
-        let method = req.method().clone();
-        let uri = req.uri().clone();
-
-        let request_id = req
-            .extensions()
-            .get::<RequestId>()
-            .map(|r| r.as_str())
-            .unwrap_or_else(|| "<missing>")
-            .to_owned();
-
-        let span = tracing::info_span!(
-            "http.request",
-            request_id = %request_id,
-            method = %method,
-            path = %uri.path(),
-        );
-
-        let response = async { next.run(req).await }.instrument(span).await;
-
-        let status = response.status().as_u16();
-
-        tracing::info!(
-            request_id = %request_id,
-            method = %method,
-            path = %uri.path(),
-            status = status,
-            "request"
-        );
-
-        response
-    }
 }
 
 #[cfg(test)]
@@ -262,7 +178,7 @@ mod tests {
         let base_url = Url::parse("https://api.upstream.com").unwrap();
         let uri: Uri = "/v1/users".parse().unwrap();
 
-        let result = Proxy::build_upstream_url(&base_url, &uri);
+        let result = ProxyServer::build_upstream_url(&base_url, &uri);
 
         assert_eq!(result.as_str(), "https://api.upstream.com/v1/users");
     }
@@ -272,7 +188,7 @@ mod tests {
         let base_url = Url::parse("https://api.upstream.com").unwrap();
         let uri: Uri = "/v1/users?page=1&limit=10".parse().unwrap();
 
-        let result = Proxy::build_upstream_url(&base_url, &uri);
+        let result = ProxyServer::build_upstream_url(&base_url, &uri);
 
         assert_eq!(
             result.as_str(),
@@ -285,7 +201,7 @@ mod tests {
         let base_url = Url::parse("https://api.upstream.com/api/v2").unwrap();
         let uri: Uri = "/users/123".parse().unwrap();
 
-        let result = Proxy::build_upstream_url(&base_url, &uri);
+        let result = ProxyServer::build_upstream_url(&base_url, &uri);
 
         // The path from uri replaces the base path
         assert_eq!(result.as_str(), "https://api.upstream.com/users/123");
@@ -296,7 +212,7 @@ mod tests {
         let base_url = Url::parse("https://api.upstream.com").unwrap();
         let uri: Uri = "/".parse().unwrap();
 
-        let result = Proxy::build_upstream_url(&base_url, &uri);
+        let result = ProxyServer::build_upstream_url(&base_url, &uri);
 
         assert_eq!(result.as_str(), "https://api.upstream.com/");
     }
@@ -309,7 +225,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "Bearer client_token".parse().unwrap());
 
-        let result = Proxy::extract_upstream_token(&state, &headers);
+        let result = ProxyServer::extract_upstream_token(&state, &headers);
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "upstream_token");
@@ -321,7 +237,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "Bearer client_token_2".parse().unwrap());
 
-        let result = Proxy::extract_upstream_token(&state, &headers);
+        let result = ProxyServer::extract_upstream_token(&state, &headers);
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "upstream_token_2");
@@ -332,7 +248,7 @@ mod tests {
         let state = create_test_app_state();
         let headers = HeaderMap::new();
 
-        let result = Proxy::extract_upstream_token(&state, &headers);
+        let result = ProxyServer::extract_upstream_token(&state, &headers);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));
@@ -344,7 +260,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "client_token".parse().unwrap());
 
-        let result = Proxy::extract_upstream_token(&state, &headers);
+        let result = ProxyServer::extract_upstream_token(&state, &headers);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));
@@ -356,7 +272,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "Bearer unknown_token".parse().unwrap());
 
-        let result = Proxy::extract_upstream_token(&state, &headers);
+        let result = ProxyServer::extract_upstream_token(&state, &headers);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));
@@ -368,7 +284,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "Basic dXNlcjpwYXNz".parse().unwrap());
 
-        let result = Proxy::extract_upstream_token(&state, &headers);
+        let result = ProxyServer::extract_upstream_token(&state, &headers);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));
@@ -387,7 +303,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let result = Proxy::build_upstream_request(&state, req).await;
+        let result = ProxyServer::build_upstream_request(&state, req).await;
 
         assert!(result.is_ok());
         let request_builder = result.unwrap();
@@ -419,7 +335,7 @@ mod tests {
             .body(Body::from(r#"{"key": "value"}"#))
             .unwrap();
 
-        let result = Proxy::build_upstream_request(&state, req).await;
+        let result = ProxyServer::build_upstream_request(&state, req).await;
 
         assert!(result.is_ok());
         let request_builder = result.unwrap();
@@ -443,7 +359,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let result = Proxy::build_upstream_request(&state, req).await;
+        let result = ProxyServer::build_upstream_request(&state, req).await;
 
         assert!(result.is_ok());
         let request_builder = result.unwrap();
@@ -463,7 +379,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let result = Proxy::build_upstream_request(&state, req).await;
+        let result = ProxyServer::build_upstream_request(&state, req).await;
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));
@@ -479,7 +395,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let result = Proxy::build_upstream_request(&state, req).await;
+        let result = ProxyServer::build_upstream_request(&state, req).await;
 
         assert!(result.is_ok());
         let request_builder = result.unwrap();
