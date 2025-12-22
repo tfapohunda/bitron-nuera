@@ -1,4 +1,3 @@
-mod app_state;
 mod config;
 mod error;
 mod proxy;

@@ -16,8 +16,8 @@ use url::Url;
 use std::net::SocketAddr;
 
 use crate::{
-    app_state::AppState,
     config::Config,
+    proxy::AppState,
     proxy::{
         error::{ProxyError, Result},
         middleware::{observability, request_id},
