@@ -5,17 +5,45 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("failed to read config file: {0}")]
-    ConfigIO(#[from] std::io::Error),
+    ReadConfig(#[from] std::io::Error),
     #[error("failed to parse config: {0}")]
-    Config(#[from] toml::de::Error),
+    ParseConfig(#[from] toml::de::Error),
+    #[error("failed to create request client: {0}")]
+    RequestClient(#[from] reqwest::Error),
+    #[error("failed to parse upstream url: {0}")]
+    InvalidUrl(String),
+    #[error("failed to convert tokens: {0}")]
+    InvalidToken(String),
 }
 
 pub type Result<T> = std::result::Result<T, ConfigError>;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    #[expect(dead_code)]
+    pub server: ServerConfig,
+    pub upstream: UpstreamConfig,
+    pub auth: AuthConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ServerConfig {
     pub address: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct UpstreamConfig {
+    pub url: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct AuthConfig {
+    pub tokens: Vec<TokenMapping>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct TokenMapping {
+    pub client: String,
+    pub upstream: String,
 }
 
 impl Config {

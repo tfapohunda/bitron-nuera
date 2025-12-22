@@ -1,1 +1,11 @@
-address = "0.0.0.0:3000"
+[server]
+    address = "0.0.0.0:3000"
+
+[upstream]
+    url = "http://127.0.0.1:3001"
+
+[auth]
+    tokens = [
+        { client = "token1", upstream = "upstream1" },
+        { client = "token2", upstream = "upstream2" },
+    ]
