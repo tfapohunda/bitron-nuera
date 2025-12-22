@@ -40,6 +40,7 @@ requests_per_minute = 60
 | `server` | `address` | Address and port the proxy listens on |
 | `upstream` | `url` | Target service URL to forward requests to |
 | `auth` | `tokens` | Token mappings from client tokens to upstream tokens |
+| `rate_limit` | `requests_per_minute` | The number of requests allowed per minute per auth token |
 
 ## Run
 
