@@ -11,14 +11,14 @@ use governor::clock::DefaultClock;
 use governor::state::keyed::DashMapStateStore;
 use governor::{Quota, RateLimiter};
 
-use crate::proxy::utils::extract_upstream_token;
+use crate::proxy::utils::extract_auth_token;
 use crate::proxy::{AppState, ProxyError, Result};
 
 pub type TokenRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RateLimiterClient {
-    limiter: Arc<TokenRateLimiter>,
+    limiter: TokenRateLimiter,
 }
 
 impl RateLimiterClient {
@@ -26,7 +26,7 @@ impl RateLimiterClient {
         let quota = Quota::per_minute(requests_per_minute);
         let rate_limiter = RateLimiter::keyed(quota);
         Self {
-            limiter: Arc::new(rate_limiter),
+            limiter: rate_limiter,
         }
     }
 
@@ -38,13 +38,13 @@ impl RateLimiterClient {
 }
 
 pub async fn rate_limit(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     req: Request,
     next: Next,
 ) -> Result<Response<Body>> {
     tracing::debug!("Rate limiting middleware");
-    let client_token = extract_upstream_token(&state, req.headers())
-        .inspect_err(|_| tracing::error!("failed to extract upstream token"))?;
+    let client_token = extract_auth_token(&state, req.headers())
+        .inspect_err(|_| tracing::error!("failed to extract auth token"))?;
 
     state
         .rate_limiter

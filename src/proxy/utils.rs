@@ -11,7 +11,7 @@ use url::Url;
 use crate::proxy::AppState;
 use crate::proxy::error::{ProxyError, Result};
 
-pub fn extract_upstream_token(state: &AppState, headers: &HeaderMap) -> Result<String> {
+pub fn extract_auth_token(state: &AppState, headers: &HeaderMap) -> Result<String> {
     let auth_header = headers.get(AUTHORIZATION).ok_or(ProxyError::Unauthorized)?;
     let auth_str = auth_header.to_str().map_err(|_| ProxyError::Unauthorized)?;
 
@@ -44,7 +44,7 @@ pub async fn build_upstream_request(
     let method = parts.method.clone();
     let headers = parts.headers.clone();
 
-    let upstream_token = extract_upstream_token(state, &headers)?;
+    let upstream_token = extract_auth_token(state, &headers)?;
     let upstream_url = build_upstream_url(&state.upstream_url, &uri);
     let body_bytes = axum::body::to_bytes(body, usize::MAX).await?;
 
@@ -142,7 +142,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "Bearer client_token".parse().unwrap());
 
-        let result = extract_upstream_token(&state, &headers);
+        let result = extract_auth_token(&state, &headers);
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "upstream_token");
@@ -154,7 +154,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "Bearer client_token_2".parse().unwrap());
 
-        let result = extract_upstream_token(&state, &headers);
+        let result = extract_auth_token(&state, &headers);
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "upstream_token_2");
@@ -165,7 +165,7 @@ mod tests {
         let state = create_test_app_state();
         let headers = HeaderMap::new();
 
-        let result = extract_upstream_token(&state, &headers);
+        let result = extract_auth_token(&state, &headers);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));
@@ -177,7 +177,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "client_token".parse().unwrap());
 
-        let result = extract_upstream_token(&state, &headers);
+        let result = extract_auth_token(&state, &headers);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));
@@ -189,7 +189,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "Bearer unknown_token".parse().unwrap());
 
-        let result = extract_upstream_token(&state, &headers);
+        let result = extract_auth_token(&state, &headers);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));
@@ -201,7 +201,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "Basic dXNlcjpwYXNz".parse().unwrap());
 
-        let result = extract_upstream_token(&state, &headers);
+        let result = extract_auth_token(&state, &headers);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));

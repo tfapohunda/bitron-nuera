@@ -40,7 +40,7 @@ pub async fn observability(req: Request, next: Next) -> Response<Body> {
         .to_owned();
 
     let span = tracing::info_span!(
-        "http.request",
+        "request",
         request_id = %request_id,
         method = %method,
         path = %uri.path(),

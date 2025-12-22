@@ -9,7 +9,7 @@ use crate::{
     upstream::UpstreamClient,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AppState {
     pub upstream_url: Url,
     pub tokens: HashMap<String, String>,

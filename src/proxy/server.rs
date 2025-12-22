@@ -10,6 +10,7 @@ use axum::{
 use reqwest::RequestBuilder;
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use crate::{
     config::Config,
@@ -32,18 +33,26 @@ impl ProxyServer {
     }
 
     pub async fn start(&self) -> Result<()> {
-        let app_state: AppState = self
-            .config
-            .clone()
-            .try_into()
-            .inspect_err(|_| tracing::error!("config validation failed"))?;
-        let app = Router::new()
+        let app_state: Arc<AppState> = Arc::new(
+            self.config
+                .clone()
+                .try_into()
+                .inspect_err(|_| tracing::error!("config validation failed"))?,
+        );
+
+        let rate_limited_routes = Router::new()
             .route("/", any(Self::proxy))
             .route("/{*wildcard}", any(Self::proxy))
-            .route("/health", any(Self::health))
             .fallback(any(Self::fallback))
-            .with_state(app_state.clone())
-            .layer(middleware::from_fn_with_state(app_state, rate_limit))
+            .layer(middleware::from_fn_with_state(
+                Arc::clone(&app_state),
+                rate_limit,
+            ));
+
+        let app = Router::new()
+            .route("/health", any(Self::health))
+            .merge(rate_limited_routes)
+            .with_state(app_state)
             .layer(middleware::from_fn(observability))
             .layer(middleware::from_fn(request_id));
 
@@ -57,7 +66,7 @@ impl ProxyServer {
         Ok(())
     }
 
-    async fn proxy(State(state): State<AppState>, req: Request<Body>) -> Result<Response> {
+    async fn proxy(State(state): State<Arc<AppState>>, req: Request<Body>) -> Result<Response> {
         tracing::debug!("Proxy request");
         let upstream_req = build_upstream_request(&state, req).await?;
         let response = Self::send_upstream_request(upstream_req).await?;
