@@ -1,6 +1,7 @@
 mod config;
 mod error;
 mod proxy;
+mod upstream;
 
 use std::path::PathBuf;
 

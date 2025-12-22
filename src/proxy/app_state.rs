@@ -2,13 +2,16 @@ use std::collections::HashMap;
 
 use url::Url;
 
-use crate::config::{Config, ConfigError, TokenMapping};
+use crate::{
+    config::{Config, ConfigError, TokenMapping},
+    upstream::UpstreamClient,
+};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub upstream_url: Url,
     pub tokens: HashMap<String, String>,
-    pub client: reqwest::Client,
+    pub client: UpstreamClient,
 }
 
 impl TryFrom<Config> for AppState {
@@ -24,7 +27,7 @@ impl TryFrom<Config> for AppState {
                 .into_iter()
                 .map(|token| token.try_into())
                 .collect::<Result<HashMap<String, String>, ConfigError>>()?,
-            client: reqwest::Client::builder().no_proxy().build()?,
+            client: UpstreamClient::new()?,
         })
     }
 }

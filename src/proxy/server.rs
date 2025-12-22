@@ -113,6 +113,7 @@ impl ProxyServer {
 
         let mut upstream_req = state
             .client
+            .client
             .request(method.clone(), upstream_url)
             .body(body_bytes);
 
@@ -123,9 +124,7 @@ impl ProxyServer {
             upstream_req = upstream_req.header(name, value);
         }
 
-        // Inject upstream auth
-        upstream_req = upstream_req.header(AUTHORIZATION, format!("Bearer {}", upstream_token));
-        Ok(upstream_req)
+        Ok(upstream_req.header(AUTHORIZATION, format!("Bearer {}", upstream_token)))
     }
 
     fn extract_upstream_token(state: &AppState, headers: &HeaderMap) -> Result<String> {
@@ -159,6 +158,8 @@ mod tests {
     use axum::http::Method;
     use std::collections::HashMap;
 
+    use crate::upstream::UpstreamClient;
+
     fn create_test_app_state() -> AppState {
         let mut tokens = HashMap::new();
         tokens.insert("client_token".to_string(), "upstream_token".to_string());
@@ -167,7 +168,7 @@ mod tests {
         AppState {
             upstream_url: Url::parse("https://api.upstream.com").unwrap(),
             tokens,
-            client: reqwest::Client::builder().no_proxy().build().unwrap(),
+            client: UpstreamClient::new().unwrap(),
         }
     }
 

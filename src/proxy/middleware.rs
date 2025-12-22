@@ -26,6 +26,7 @@ pub async fn request_id(mut req: ExtractRequest, next: Next) -> Response<Body> {
 }
 
 pub async fn observability(req: ExtractRequest, next: Next) -> Response<Body> {
+    let start = std::time::Instant::now();
     let method = req.method().clone();
     let uri = req.uri().clone();
 
@@ -44,12 +45,13 @@ pub async fn observability(req: ExtractRequest, next: Next) -> Response<Body> {
     );
 
     let response = async { next.run(req).await }.instrument(span).await;
-
+    let elapsed_ms = start.elapsed().as_millis();
     let status = response.status().as_u16();
 
     tracing::info!(
         request_id = %request_id,
         method = %method,
+        latency_ms = elapsed_ms,
         path = %uri.path(),
         status = status,
         "request"

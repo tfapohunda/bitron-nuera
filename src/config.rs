@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::path::Path;
 use thiserror::Error;
 
+use crate::upstream::UpstreamError;
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("failed to read config file: {0}")]
@@ -14,6 +16,8 @@ pub enum ConfigError {
     InvalidUrl(String),
     #[error("failed to convert tokens: {0}")]
     InvalidToken(String),
+    #[error("failed to create upstream client: {0}")]
+    UpstreamClient(#[from] UpstreamError),
 }
 
 pub type Result<T> = std::result::Result<T, ConfigError>;
