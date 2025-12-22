@@ -2,11 +2,13 @@ mod app_state;
 mod config;
 mod error;
 mod proxy;
+mod request_id;
 
 use std::path::PathBuf;
 
 use clap::Parser;
 use proxy::Proxy;
+use tracing_subscriber::EnvFilter;
 
 use crate::{config::Config, error::Result};
 
@@ -18,9 +20,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
+    let filter = EnvFilter::new("debug,reqwest=error,hyper=error,hyper_util=error");
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let args = Args::parse();
     let config = Config::from(&args.config_path).await?;

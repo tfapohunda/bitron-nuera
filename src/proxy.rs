@@ -1,11 +1,13 @@
 use axum::{
-    Router,
+    Extension, Router,
     body::Body,
-    extract::State,
+    extract::{Request as ExtractRequest, State},
     http::{HeaderMap, Request, StatusCode, Uri},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::any,
 };
+use http::{HeaderName, HeaderValue};
 use reqwest::{
     RequestBuilder,
     header::{AUTHORIZATION, HOST},
@@ -18,7 +20,10 @@ use thiserror::Error;
 use crate::{
     app_state::AppState,
     config::{Config, ConfigError},
+    request_id::RequestId,
 };
+
+static REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -71,6 +76,7 @@ impl Proxy {
             .route("/{*wildcard}", any(Self::proxy))
             .route("/health", any(Self::health))
             .fallback(any(Self::fallback))
+            .layer(middleware::from_fn(Self::add_request_id))
             .with_state(app_state);
 
         let addr = self.config.server.address.parse::<SocketAddr>()?;
@@ -84,20 +90,24 @@ impl Proxy {
         Ok(())
     }
 
-    async fn proxy(State(state): State<AppState>, req: Request<Body>) -> Result<Response> {
-        tracing::debug!(url = %req.uri(), upstream = %state.upstream_url, "Proxy request");
+    async fn proxy(
+        State(state): State<AppState>,
+        Extension(request_id): Extension<RequestId>,
+        req: Request<Body>,
+    ) -> Result<Response> {
+        tracing::debug!(request_id = %request_id.as_str(), url = %req.uri(), "Proxy request");
         let upstream_req = Self::build_upstream_request(&state, req).await?;
         let response = Self::send_upstream_request(upstream_req).await?;
         Self::build_downstream_response(response).await
     }
 
-    async fn fallback() -> impl IntoResponse {
-        tracing::error!("Fallback not expected");
+    async fn fallback(Extension(request_id): Extension<RequestId>) -> impl IntoResponse {
+        tracing::error!(request_id = %request_id.as_str(), "Fallback not expected");
         StatusCode::NOT_FOUND
     }
 
-    async fn health() -> impl IntoResponse {
-        tracing::debug!("Health request");
+    async fn health(Extension(request_id): Extension<RequestId>) -> impl IntoResponse {
+        tracing::debug!(request_id = %request_id.as_str(), "Health request");
         StatusCode::OK
     }
 
@@ -180,6 +190,20 @@ impl Proxy {
             url.set_query(path_query.query());
         }
         url
+    }
+
+    async fn add_request_id(mut req: ExtractRequest, next: Next) -> Response {
+        let request_id = RequestId::new();
+        req.extensions_mut().insert(request_id.clone());
+
+        let mut response = next.run(req).await;
+
+        response.headers_mut().insert(
+            REQUEST_ID_HEADER.clone(),
+            HeaderValue::from_str(request_id.as_str()).unwrap(),
+        );
+
+        response
     }
 }
 
