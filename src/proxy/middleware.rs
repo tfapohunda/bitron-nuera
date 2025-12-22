@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::Request as ExtractRequest,
+    extract::Request,
     http::{HeaderValue, Response},
     middleware::Next,
 };
@@ -11,7 +11,8 @@ use crate::proxy::request_id::RequestId;
 
 static REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 
-pub async fn request_id(mut req: ExtractRequest, next: Next) -> Response<Body> {
+pub async fn request_id(mut req: Request, next: Next) -> Response<Body> {
+    tracing::debug!("Request ID middleware");
     let request_id = RequestId::new();
     req.extensions_mut().insert(request_id.clone());
 
@@ -25,7 +26,8 @@ pub async fn request_id(mut req: ExtractRequest, next: Next) -> Response<Body> {
     response
 }
 
-pub async fn observability(req: ExtractRequest, next: Next) -> Response<Body> {
+pub async fn observability(req: Request, next: Next) -> Response<Body> {
+    tracing::debug!("Observability middleware");
     let start = std::time::Instant::now();
     let method = req.method().clone();
     let uri = req.uri().clone();

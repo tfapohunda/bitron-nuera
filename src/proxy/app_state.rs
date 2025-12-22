@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 
 use url::Url;
 
 use crate::{
     config::{Config, ConfigError, TokenMapping},
+    proxy::RateLimiterClient,
     upstream::UpstreamClient,
 };
 
@@ -12,6 +14,7 @@ pub struct AppState {
     pub upstream_url: Url,
     pub tokens: HashMap<String, String>,
     pub client: UpstreamClient,
+    pub rate_limiter: RateLimiterClient,
 }
 
 impl TryFrom<Config> for AppState {
@@ -28,6 +31,10 @@ impl TryFrom<Config> for AppState {
                 .map(|token| token.try_into())
                 .collect::<Result<HashMap<String, String>, ConfigError>>()?,
             client: UpstreamClient::new()?,
+            rate_limiter: RateLimiterClient::new(
+                NonZeroU32::new(config.rate_limit.requests_per_minute)
+                    .ok_or(ConfigError::InvalidRateLimit)?,
+            ),
         })
     }
 }
@@ -51,7 +58,7 @@ impl TryFrom<TokenMapping> for (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AuthConfig, ServerConfig, UpstreamConfig};
+    use crate::config::{AuthConfig, RateLimitConfig, ServerConfig, UpstreamConfig};
 
     fn create_test_config(tokens: Vec<TokenMapping>) -> Config {
         Config {
@@ -62,6 +69,9 @@ mod tests {
                 url: "https://api.example.com".to_string(),
             },
             auth: AuthConfig { tokens },
+            rate_limit: RateLimitConfig {
+                requests_per_minute: 100,
+            },
         }
     }
 

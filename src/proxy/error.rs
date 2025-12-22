@@ -20,6 +20,8 @@ pub enum ProxyError {
     ResponseBuild(#[from] http::Error),
     #[error("unauthorized")]
     Unauthorized,
+    #[error("rate limit exceeded")]
+    RateLimitExceeded,
 }
 
 impl IntoResponse for ProxyError {
@@ -32,6 +34,7 @@ impl IntoResponse for ProxyError {
             ProxyError::UpstreamRequest(_) => StatusCode::BAD_GATEWAY,
             ProxyError::ResponseBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ProxyError::Unauthorized => StatusCode::UNAUTHORIZED,
+            ProxyError::RateLimitExceeded => StatusCode::TOO_MANY_REQUESTS,
         };
         (status, self.to_string()).into_response()
     }

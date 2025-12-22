@@ -18,6 +18,8 @@ pub enum ConfigError {
     InvalidToken(String),
     #[error("failed to create upstream client: {0}")]
     UpstreamClient(#[from] UpstreamError),
+    #[error("rate limit must be greater than zero")]
+    InvalidRateLimit,
 }
 
 pub type Result<T> = std::result::Result<T, ConfigError>;
@@ -27,6 +29,7 @@ pub struct Config {
     pub server: ServerConfig,
     pub upstream: UpstreamConfig,
     pub auth: AuthConfig,
+    pub rate_limit: RateLimitConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -48,6 +51,11 @@ pub struct AuthConfig {
 pub struct TokenMapping {
     pub client: String,
     pub upstream: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RateLimitConfig {
+    pub requests_per_minute: u32,
 }
 
 impl Config {

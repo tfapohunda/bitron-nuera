@@ -1,11 +1,14 @@
 [server]
-    address = "0.0.0.0:3000"
+address = "0.0.0.0:3000"
 
 [upstream]
-    url = "http://127.0.0.1:3001"
+url = "http://127.0.0.1:3001"
 
 [auth]
-    tokens = [
-        { client = "token1", upstream = "upstream1" },
-        { client = "token2", upstream = "upstream2" },
-    ]
+tokens = [
+    { client = "token1", upstream = "upstream1" },
+    { client = "token2", upstream = "upstream2" },
+]
+
+[rate_limit]
+requests_per_minute = 60
