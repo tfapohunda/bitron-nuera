@@ -30,6 +30,9 @@ tokens = [
     { client = "token1", upstream = "upstream_token_1" },
     { client = "token2", upstream = "upstream_token_2" },
 ]
+
+[rate_limit]
+requests_per_minute = 60
 ```
 
 | Section | Field | Description |
