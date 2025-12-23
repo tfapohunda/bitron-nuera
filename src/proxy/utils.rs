@@ -1,7 +1,11 @@
 use axum::{
     body::Body,
     http::{HeaderMap, Request, Uri},
+    response::Response,
 };
+use futures_util::TryStreamExt;
+use http_body::Frame;
+use http_body_util::StreamBody;
 use reqwest::{
     RequestBuilder,
     header::{AUTHORIZATION, HOST},
@@ -35,10 +39,7 @@ pub fn build_upstream_url(base_url: &Url, path: &Uri) -> Url {
     url
 }
 
-pub async fn build_upstream_request(
-    state: &AppState,
-    req: Request<Body>,
-) -> Result<RequestBuilder> {
+pub fn build_upstream_request(state: &AppState, req: Request<Body>) -> Result<RequestBuilder> {
     let (parts, body) = req.into_parts();
     let uri = parts.uri.clone();
     let method = parts.method.clone();
@@ -46,13 +47,17 @@ pub async fn build_upstream_request(
 
     let upstream_token = extract_auth_token(state, &headers)?;
     let upstream_url = build_upstream_url(&state.upstream_url, &uri);
-    let body_bytes = axum::body::to_bytes(body, usize::MAX).await?;
+    let body_stream = body.into_data_stream().map_err(|err| {
+        tracing::error!(%err, "failed to convert body to stream");
+        std::io::Error::other(err)
+    });
+    let streaming_body = reqwest::Body::wrap_stream(body_stream);
 
     let mut upstream_req = state
         .client
         .client
         .request(method.clone(), upstream_url)
-        .body(body_bytes);
+        .body(streaming_body);
 
     for (name, value) in headers.iter() {
         if name == AUTHORIZATION || name == HOST {
@@ -62,6 +67,23 @@ pub async fn build_upstream_request(
     }
 
     Ok(upstream_req.header(AUTHORIZATION, format!("Bearer {}", upstream_token)))
+}
+
+pub fn build_downstream_response(response: reqwest::Response) -> Result<Response> {
+    let status = response.status();
+    let resp_headers = response.headers().clone();
+    let response_stream = response.bytes_stream().map_ok(Frame::data);
+
+    let stream_body = StreamBody::new(response_stream);
+    let body = Body::new(stream_body);
+
+    let mut response = axum::response::Response::builder().status(status);
+    for (name, value) in resp_headers.iter() {
+        response = response.header(name, value);
+    }
+    let resp = response.body(body).map_err(ProxyError::ResponseBuild)?;
+
+    Ok(resp)
 }
 
 #[cfg(test)]
@@ -220,7 +242,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let result = build_upstream_request(&state, req).await;
+        let result = build_upstream_request(&state, req);
 
         assert!(result.is_ok());
         let request_builder = result.unwrap();
@@ -252,7 +274,7 @@ mod tests {
             .body(Body::from(r#"{"key": "value"}"#))
             .unwrap();
 
-        let result = build_upstream_request(&state, req).await;
+        let result = build_upstream_request(&state, req);
 
         assert!(result.is_ok());
         let request_builder = result.unwrap();
@@ -276,7 +298,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let result = build_upstream_request(&state, req).await;
+        let result = build_upstream_request(&state, req);
 
         assert!(result.is_ok());
         let request_builder = result.unwrap();
@@ -296,7 +318,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let result = build_upstream_request(&state, req).await;
+        let result = build_upstream_request(&state, req);
 
         assert!(result.is_err());
         assert!(matches!(result, Err(ProxyError::Unauthorized)));
@@ -312,7 +334,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let result = build_upstream_request(&state, req).await;
+        let result = build_upstream_request(&state, req);
 
         assert!(result.is_ok());
         let request_builder = result.unwrap();

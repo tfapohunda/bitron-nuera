@@ -19,7 +19,7 @@ use crate::{
         error::{ProxyError, Result},
         middleware::{observability, request_id},
         rate_limit,
-        utils::build_upstream_request,
+        utils::{build_downstream_response, build_upstream_request},
     },
 };
 
@@ -68,9 +68,10 @@ impl ProxyServer {
 
     async fn proxy(State(state): State<Arc<AppState>>, req: Request<Body>) -> Result<Response> {
         tracing::debug!("Proxy request");
-        let upstream_req = build_upstream_request(&state, req).await?;
+        let upstream_req = build_upstream_request(&state, req)?;
         let response = Self::send_upstream_request(upstream_req).await?;
-        Self::build_downstream_response(response).await
+        let result = build_downstream_response(response)?;
+        Ok(result)
     }
 
     async fn fallback() -> impl IntoResponse {
@@ -78,9 +79,18 @@ impl ProxyServer {
         StatusCode::NOT_FOUND
     }
 
-    async fn health() -> impl IntoResponse {
+    async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         tracing::debug!("Health request");
-        (StatusCode::OK, "ok")
+        match state
+            .client
+            .client
+            .get(state.upstream_url.clone())
+            .send()
+            .await
+        {
+            Ok(_) => (StatusCode::OK, "ok"),
+            Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "upstream unavailable"),
+        }
     }
 
     async fn send_upstream_request(upstream_req: RequestBuilder) -> Result<reqwest::Response> {
@@ -89,24 +99,5 @@ impl ProxyServer {
             .await
             .map_err(ProxyError::UpstreamRequest)?;
         Ok(response)
-    }
-
-    async fn build_downstream_response(response: reqwest::Response) -> Result<Response> {
-        let status = response.status();
-        let resp_headers = response.headers().clone();
-        let resp_body = response
-            .bytes()
-            .await
-            .map_err(ProxyError::UpstreamRequest)?;
-
-        let mut response = axum::response::Response::builder().status(status);
-        for (name, value) in resp_headers.iter() {
-            response = response.header(name, value);
-        }
-        let resp = response
-            .body(Body::from(resp_body))
-            .map_err(ProxyError::ResponseBuild)?;
-
-        Ok(resp)
     }
 }
