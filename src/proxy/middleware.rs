@@ -7,11 +7,12 @@ use axum::{
 use http::HeaderName;
 use tracing::Instrument;
 
+use crate::proxy::error::Result;
 use crate::proxy::request_id::RequestId;
 
 static REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 
-pub async fn request_id(mut req: Request, next: Next) -> Response<Body> {
+pub async fn request_id(mut req: Request, next: Next) -> Result<Response<Body>> {
     tracing::debug!("Request ID middleware");
     let request_id = RequestId::new();
     req.extensions_mut().insert(request_id.clone());
@@ -20,10 +21,10 @@ pub async fn request_id(mut req: Request, next: Next) -> Response<Body> {
 
     response.headers_mut().insert(
         REQUEST_ID_HEADER.clone(),
-        HeaderValue::from_str(request_id.as_str()).unwrap(),
+        HeaderValue::from_str(request_id.as_str())?,
     );
 
-    response
+    Ok(response)
 }
 
 pub async fn observability(req: Request, next: Next) -> Response<Body> {

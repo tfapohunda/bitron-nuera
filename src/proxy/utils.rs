@@ -12,8 +12,8 @@ use reqwest::{
 };
 use url::Url;
 
-use crate::proxy::AppState;
 use crate::proxy::error::{ProxyError, Result};
+use crate::proxy::{AppState, UpstreamToken};
 
 pub fn extract_auth_token(state: &AppState, headers: &HeaderMap) -> Result<String> {
     let auth_header = headers.get(AUTHORIZATION).ok_or(ProxyError::Unauthorized)?;
@@ -45,7 +45,11 @@ pub fn build_upstream_request(state: &AppState, req: Request<Body>) -> Result<Re
     let method = parts.method.clone();
     let headers = parts.headers.clone();
 
-    let upstream_token = extract_auth_token(state, &headers)?;
+    let upstream_token = parts
+        .extensions
+        .get::<UpstreamToken>()
+        .ok_or(ProxyError::Unauthorized)?;
+
     let upstream_url = build_upstream_url(&state.upstream_url, &uri);
     let body_stream = body.into_data_stream().map_err(|err| {
         tracing::error!(%err, "failed to convert body to stream");
@@ -234,13 +238,14 @@ mod tests {
     #[tokio::test]
     async fn test_build_upstream_request_valid() {
         let state = create_test_app_state();
-        let req = Request::builder()
+        let mut req = Request::builder()
             .method(Method::GET)
             .uri("/api/users")
-            .header(AUTHORIZATION, "Bearer client_token")
             .header("X-Custom-Header", "custom_value")
             .body(Body::empty())
             .unwrap();
+        req.extensions_mut()
+            .insert(UpstreamToken::new("upstream_token"));
 
         let result = build_upstream_request(&state, req);
 
@@ -266,13 +271,15 @@ mod tests {
     #[tokio::test]
     async fn test_build_upstream_request_post_with_body() {
         let state = create_test_app_state();
-        let req = Request::builder()
+        let mut req = Request::builder()
             .method(Method::POST)
             .uri("/api/data")
-            .header(AUTHORIZATION, "Bearer client_token")
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"key": "value"}"#))
             .unwrap();
+
+        req.extensions_mut()
+            .insert(UpstreamToken::new("upstream_token"));
 
         let result = build_upstream_request(&state, req);
 
@@ -290,13 +297,14 @@ mod tests {
     #[tokio::test]
     async fn test_build_upstream_request_strips_host_header() {
         let state = create_test_app_state();
-        let req = Request::builder()
+        let mut req = Request::builder()
             .method(Method::GET)
             .uri("/api/users")
-            .header(AUTHORIZATION, "Bearer client_token")
             .header(HOST, "original.host.com")
             .body(Body::empty())
             .unwrap();
+        req.extensions_mut()
+            .insert(UpstreamToken::new("upstream_token"));
 
         let result = build_upstream_request(&state, req);
 
@@ -327,12 +335,13 @@ mod tests {
     #[tokio::test]
     async fn test_build_upstream_request_with_query_params() {
         let state = create_test_app_state();
-        let req = Request::builder()
+        let mut req = Request::builder()
             .method(Method::GET)
             .uri("/api/search?q=test&page=2")
-            .header(AUTHORIZATION, "Bearer client_token")
             .body(Body::empty())
             .unwrap();
+        req.extensions_mut()
+            .insert(UpstreamToken::new("upstream_token"));
 
         let result = build_upstream_request(&state, req);
 

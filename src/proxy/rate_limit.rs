@@ -11,8 +11,8 @@ use governor::clock::DefaultClock;
 use governor::state::keyed::DashMapStateStore;
 use governor::{Quota, RateLimiter};
 
-use crate::proxy::utils::extract_auth_token;
 use crate::proxy::{AppState, ProxyError, Result};
+use crate::proxy::{UpstreamToken, utils::extract_auth_token};
 
 pub type TokenRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
 
@@ -39,7 +39,7 @@ impl RateLimiterClient {
 
 pub async fn rate_limit(
     State(state): State<Arc<AppState>>,
-    req: Request,
+    mut req: Request,
     next: Next,
 ) -> Result<Response<Body>> {
     tracing::debug!("Rate limiting middleware");
@@ -55,6 +55,9 @@ pub async fn rate_limit(
                 "rate limit exceeded"
             )
         })?;
+
+    req.extensions_mut()
+        .insert(UpstreamToken::new(&client_token));
 
     Ok(next.run(req).await)
 }

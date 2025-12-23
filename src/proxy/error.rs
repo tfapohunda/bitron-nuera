@@ -22,6 +22,8 @@ pub enum ProxyError {
     Unauthorized,
     #[error("rate limit exceeded")]
     RateLimitExceeded,
+    #[error("failed to convert header value: {0}")]
+    InvalidHeaderValue(#[from] http::header::InvalidHeaderValue),
 }
 
 impl IntoResponse for ProxyError {
@@ -35,6 +37,7 @@ impl IntoResponse for ProxyError {
             ProxyError::ResponseBuild(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ProxyError::Unauthorized => StatusCode::UNAUTHORIZED,
             ProxyError::RateLimitExceeded => StatusCode::TOO_MANY_REQUESTS,
+            ProxyError::InvalidHeaderValue(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (status, self.to_string()).into_response()
     }
