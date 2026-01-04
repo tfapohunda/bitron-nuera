@@ -15,6 +15,18 @@ use url::Url;
 use crate::proxy::error::{ProxyError, Result};
 use crate::proxy::{AppState, UpstreamToken};
 
+/// Extracts and validates the authorization token from request headers.
+///
+/// Parses the `Authorization` header, expects a Bearer token format,
+/// and looks up the corresponding upstream token in the application state.
+///
+/// # Errors
+///
+/// Returns [`ProxyError::Unauthorized`] if:
+/// - The `Authorization` header is missing
+/// - The header value is not valid UTF-8
+/// - The token does not have a "Bearer " prefix
+/// - The token is not found in the configured token mappings
 pub fn extract_auth_token(state: &AppState, headers: &HeaderMap) -> Result<String> {
     let auth_header = headers.get(AUTHORIZATION).ok_or(ProxyError::Unauthorized)?;
     let auth_str = auth_header.to_str().map_err(|_| ProxyError::Unauthorized)?;
@@ -30,6 +42,10 @@ pub fn extract_auth_token(state: &AppState, headers: &HeaderMap) -> Result<Strin
         .ok_or(ProxyError::Unauthorized)
 }
 
+/// Constructs the upstream URL by combining the base URL with the request path and query.
+///
+/// Takes the base upstream URL and replaces its path and query components
+/// with those from the incoming request URI.
 pub fn build_upstream_url(base_url: &Url, path: &Uri) -> Url {
     let mut url = base_url.clone();
     if let Some(path_query) = path.path_and_query() {
@@ -39,6 +55,19 @@ pub fn build_upstream_url(base_url: &Url, path: &Uri) -> Url {
     url
 }
 
+/// Builds an upstream HTTP request from an incoming client request.
+///
+/// Transforms the incoming Axum request into a reqwest [`RequestBuilder`] configured
+/// for the upstream server. This includes:
+/// - Constructing the upstream URL
+/// - Streaming the request body
+/// - Forwarding headers (except `Authorization` and `Host`)
+/// - Setting the upstream authorization token
+///
+/// # Errors
+///
+/// Returns [`ProxyError::Unauthorized`] if the upstream token is not found
+/// in the request extensions.
 pub fn build_upstream_request(state: &AppState, req: Request<Body>) -> Result<RequestBuilder> {
     let (parts, body) = req.into_parts();
     let uri = parts.uri.clone();
@@ -73,6 +102,15 @@ pub fn build_upstream_request(state: &AppState, req: Request<Body>) -> Result<Re
     Ok(upstream_req.header(AUTHORIZATION, format!("Bearer {}", upstream_token)))
 }
 
+/// Converts an upstream response into a downstream Axum response.
+///
+/// Transforms a reqwest [`Response`] from the upstream server into an Axum
+/// [`Response`] to send back to the client. The response body is streamed
+/// to avoid buffering large payloads in memory.
+///
+/// # Errors
+///
+/// Returns [`ProxyError::ResponseBuild`] if the response cannot be constructed.
 pub fn build_downstream_response(response: reqwest::Response) -> Result<Response> {
     let status = response.status();
     let resp_headers = response.headers().clone();

@@ -10,8 +10,18 @@ use tracing::Instrument;
 use crate::proxy::error::Result;
 use crate::proxy::request_id::RequestId;
 
+/// The HTTP header name used for request IDs.
 static REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 
+/// Axum middleware that generates and attaches a unique request ID.
+///
+/// Generates a UUID-based request ID, stores it in the request extensions
+/// for use by other handlers and middleware, and adds it to the response
+/// headers as `X-Request-Id`.
+///
+/// # Errors
+///
+/// Returns an error if the request ID cannot be converted to a valid header value.
 pub async fn request_id(mut req: Request, next: Next) -> Result<Response<Body>> {
     tracing::debug!("Request ID middleware");
     let request_id = RequestId::new();
@@ -27,6 +37,10 @@ pub async fn request_id(mut req: Request, next: Next) -> Result<Response<Body>> 
     Ok(response)
 }
 
+/// Axum middleware that provides request logging and tracing.
+///
+/// Creates a tracing span for each request with the request ID, HTTP method,
+/// and path. Logs request completion with latency and status code information.
 pub async fn observability(req: Request, next: Next) -> Response<Body> {
     tracing::debug!("Observability middleware");
     let start = std::time::Instant::now();
