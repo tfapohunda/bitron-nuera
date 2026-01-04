@@ -4,6 +4,10 @@ use thiserror::Error;
 
 use crate::config::ConfigError;
 
+/// Errors that can occur during proxy operations.
+///
+/// Each variant maps to an appropriate HTTP status code when converted
+/// into an Axum response.
 #[derive(Debug, Error)]
 pub enum ProxyError {
     #[error("failed to create service: {0}")]
@@ -43,4 +47,5 @@ impl IntoResponse for ProxyError {
     }
 }
 
+/// A specialized [`Result`] type for proxy operations.
 pub type Result<T> = std::result::Result<T, ProxyError>;

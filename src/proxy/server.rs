@@ -23,15 +23,32 @@ use crate::{
     },
 };
 
+/// The main HTTP reverse proxy server.
+///
+/// Handles incoming HTTP requests, authenticates clients, applies rate limiting,
+/// and forwards requests to the configured upstream server.
 pub struct ProxyServer {
+    /// The server configuration.
     config: Config,
 }
 
 impl ProxyServer {
+    /// Creates a new proxy server with the given configuration.
     pub fn new(config: Config) -> Self {
         Self { config }
     }
 
+    /// Starts the proxy server and begins listening for connections.
+    ///
+    /// This method sets up the Axum router with all routes and middleware,
+    /// then binds to the configured address and serves requests indefinitely.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The configuration cannot be converted to application state
+    /// - The server address cannot be parsed
+    /// - The server fails to bind or start
     pub async fn start(&self) -> Result<()> {
         let app_state: Arc<AppState> = Arc::new(
             self.config
@@ -66,6 +83,7 @@ impl ProxyServer {
         Ok(())
     }
 
+    /// Handles proxied requests by forwarding them to the upstream server.
     async fn proxy(State(state): State<Arc<AppState>>, req: Request<Body>) -> Result<Response> {
         tracing::debug!("Proxy request");
         let upstream_req = build_upstream_request(&state, req)?;
@@ -74,11 +92,13 @@ impl ProxyServer {
         Ok(result)
     }
 
+    /// Fallback handler for unmatched routes.
     async fn fallback() -> impl IntoResponse {
         tracing::error!("Fallback not expected");
         StatusCode::NOT_FOUND
     }
 
+    /// Health check endpoint that verifies upstream connectivity.
     async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         tracing::debug!("Health request");
         match state
@@ -93,6 +113,7 @@ impl ProxyServer {
         }
     }
 
+    /// Sends a request to the upstream server.
     async fn send_upstream_request(upstream_req: RequestBuilder) -> Result<reqwest::Response> {
         let response = upstream_req
             .send()

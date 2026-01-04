@@ -1,3 +1,11 @@
+//! Proxy module containing the core proxy server implementation.
+//!
+//! This module provides the HTTP reverse proxy functionality including:
+//! - Request proxying to upstream servers
+//! - Token-based authentication and authorization
+//! - Rate limiting per client token
+//! - Request/response middleware (observability, request IDs)
+
 mod app_state;
 mod error;
 mod middleware;

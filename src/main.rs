@@ -11,12 +11,18 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{config::Config, error::Result};
 
+/// Command-line arguments for the proxy server.
 #[derive(Parser, Debug)]
 struct Args {
+    /// Path to the configuration file.
     #[arg(short, long, default_value = "config.toml")]
     config_path: PathBuf,
 }
 
+/// Entry point for the proxy server.
+///
+/// Initializes logging, parses command-line arguments, loads the configuration,
+/// and starts the proxy server.
 #[tokio::main]
 async fn main() -> Result<()> {
     let filter = EnvFilter::new("info,reqwest=error,hyper=error,hyper_util=error");

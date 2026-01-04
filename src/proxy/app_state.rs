@@ -9,11 +9,19 @@ use crate::{
     upstream::UpstreamClient,
 };
 
+/// Shared application state for the proxy server.
+///
+/// Contains all the runtime state needed to handle proxy requests,
+/// including the upstream URL, token mappings, HTTP client, and rate limiter.
 #[derive(Debug)]
 pub struct AppState {
+    /// The base URL of the upstream server.
     pub upstream_url: Url,
+    /// Mapping of client tokens to upstream tokens.
     pub tokens: HashMap<String, String>,
+    /// HTTP client for making requests to the upstream server.
     pub client: UpstreamClient,
+    /// Rate limiter for enforcing per-token request limits.
     pub rate_limiter: RateLimiterClient,
 }
 
